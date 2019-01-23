@@ -1,0 +1,3 @@
+[submodule "private/rmd"]
+	path = private/rmd
+	url = https://github.com/grtsvetkov/rmd.git
