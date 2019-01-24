@@ -36,82 +36,79 @@ let
     archiveName_mysql = namePrefix + '.sql.gz',
     remoteTmpDir = config.remoteTmp ? config.remoteTmp : '/tmp/',
 
-    removeTmpArchive = (archiveName, desc) => {
-        return new Promise((resolve, reject) => {
 
-            console.log(('\t' + messages.REMOVE_TMP_ARCHIVE + desc).bold.blue);
+    execCmd = (cmd, descBefore, descAfter, stopOnErrorFlag) => new Promise((resolve, reject) => {
 
-            let cmd = 'rm ' + remoteTmpDir + archiveName;
-            console.log('\t' + cmd);
+        if (descBefore) {
+            console.log(descBefore);
+        }
+        console.log('\t' + cmd);
 
-            sshConn.exec(cmd, (err, stream) => {
-                if (err) {
-                    reject(new Error(err));
+        sshConn.exec(cmd, (err, stream) => {
+            if (err) {
+                reject(new Error(err));
+            }
+
+            stream.on('close', () => {
+
+                if (descAfter) {
+                    console.log(descAfter);
                 }
 
-                stream.on('close', () => {
-                    console.log((messages.TMP_ARCHIVE + desc + messages.REMOVE_SUCC).bold.green);
+                resolve();
 
-                    resolve();
-
-                }).on('data', (data) => {
-                    //console.log('STDOUT: ' + data);
-                }).stderr.on('data', (data) => {
+            }).on('data', (data) => {
+                //console.log('STDOUT: ' + data);
+            }).stderr.on('data', (data) => {
+                if (stopOnErrorFlag) {
                     reject(new Error(data));
-                });
-            });
-        })
-    },
-    downloadArchive = (remotePath, localPath, desc) => {
-        return new Promise((resolve, reject) => {
-
-            sshConn.sftp(function (err, sftp) {
-                if (err) {
-                    reject(new Error(err));
-                }
-
-                console.log(('\t' + messages.DOWNLOAD_ARCHIVE + remotePath).bold.blue);
-
-                sftp.fastGet(remotePath, localPath, {}, (downloadError) => {
-
-                    if (downloadError) {
-                        reject(new Error(downloadError));
-                    }
-
-                    console.log((messages.ARCHIVE + desc + messages.DOWNLOAD_SUCC).bold.green);
-
-                    resolve();
-                });
-            });
-        });
-    },
-
-    makeArchive = (cmd, desc) => {
-
-        return new Promise((resolve, reject) => {
-
-            console.log(('\t' + messages.CREATE_ARCHIVE + desc).bold.blue);
-
-            console.log('\t' + cmd);
-
-            sshConn.exec(cmd, (err, stream) => {
-                if (err) {
-                    throw err;
-                }
-
-                stream.on('close', () => {
-                    console.log((messages.ARCHIVE + desc + messages.CREATE_SUCC).bold.green);
-
-                    resolve();
-
-                }).on('data', (data) => {
-                    //console.log('STDOUT: ' + data);
-                }).stderr.on('data', (data) => {
+                } else {
                     console.log('\tSTDERR: ' + data);
-                });
-            })
+                }
+            });
         });
-    };
+
+    }),
+
+    removeTmpArchive = (archiveName, desc) => new Promise((resolve, reject) => {
+        execCmd(
+            cmd, //cmd
+            ('\t' + messages.REMOVE_TMP_ARCHIVE + desc).bold.blue, //descBefore
+            (messages.TMP_ARCHIVE + desc + messages.REMOVE_SUCC).bold.green, //descAfter
+            true //stopOnErrorFlag
+        ).then(resolve).catch(err => reject(err));
+    }),
+
+    downloadArchive = (remotePath, localPath, desc) => new Promise((resolve, reject) => {
+
+        sshConn.sftp(function (err, sftp) {
+            if (err) {
+                reject(new Error(err));
+            }
+
+            console.log(('\t' + messages.DOWNLOAD_ARCHIVE + remotePath).bold.blue);
+
+            sftp.fastGet(remotePath, localPath, {}, (downloadError) => {
+
+                if (downloadError) {
+                    reject(new Error(downloadError));
+                }
+
+                console.log((messages.ARCHIVE + desc + messages.DOWNLOAD_SUCC).bold.green);
+
+                resolve();
+            });
+        });
+    }),
+
+    makeArchive = (cmd, desc) => new Promise((resolve, reject) => {
+        execCmd(
+            cmd, //cmd
+            ('\t' + messages.CREATE_ARCHIVE + desc).bold.blue, //descBefore
+            (messages.ARCHIVE + desc + messages.CREATE_SUCC).bold.green, //descAfter
+            false //stopOnErrorFlag
+        ).then(resolve).catch(err => reject(err));
+    });
 
 
 console.log('---------------------------'.bold.blue);
@@ -125,9 +122,28 @@ try {
 
         console.log((messages.SSH_CLIENT_READY).bold.green);
 
-        let cmd = 'tar -zcvf ' + remoteTmpDir + archiveName_file + ' -P ' + config.appPath;
 
-        makeArchive(cmd, messages.FILES) //Делаем резеврную копию файлов
+        let beforePromise = new Promise((resolve) => resolve());
+
+        if (config.before_makeArchive_file) {
+            beforePromise = execCmd(config.before_makeArchive_file, 'before make archive cmd');
+        }
+
+        beforePromise
+            .then(() => { //Делаем резеврную копию файлов
+
+                let cmd = 'tar -zcvf ' + remoteTmpDir + archiveName_file;
+
+                if (config.archiveIgnoreFolders) {
+                    config.archiveIgnoreFolders.forEach((folder) => {
+                        cmd += ' --exclude=' + config.appPath + folder;
+                    })
+                }
+
+                cmd += ' -P ' + config.appPath;
+
+                return makeArchive(cmd, messages.FILES);
+            })
 
             .then(() => { //Скачиваем резервную копию файлов
                 let remotePath = remoteTmpDir + archiveName_file,
