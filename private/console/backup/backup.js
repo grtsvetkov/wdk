@@ -34,6 +34,7 @@ let
     namePrefix = process.argv[2] + require('moment')().format('__DD.MM.YYYY_hh.mm'),
     archiveName_file = namePrefix + '.tar.gz',
     archiveName_mysql = namePrefix + '.sql.gz',
+    localPath = pathResolve(__dirname + '/archive') + '/',
     remoteTmpDir = config.remoteTmp ? config.remoteTmp : '/tmp/',
 
 
@@ -72,7 +73,7 @@ let
 
     removeTmpArchive = (archiveName, desc) => new Promise((resolve, reject) => {
         execCmd(
-            cmd, //cmd
+            ('rm ' + remoteTmpDir + archiveName), //cmd
             ('\t' + messages.REMOVE_TMP_ARCHIVE + desc).bold.blue, //descBefore
             (messages.TMP_ARCHIVE + desc + messages.REMOVE_SUCC).bold.green, //descAfter
             true //stopOnErrorFlag
@@ -125,8 +126,8 @@ try {
 
         let beforePromise = new Promise((resolve) => resolve());
 
-        if (config.before_makeArchive_file) {
-            beforePromise = execCmd(config.before_makeArchive_file, 'before make archive cmd');
+        if (config.beforeCmd) {
+            beforePromise = execCmd(config.beforeCmd, 'before cmd'.bold.yellow);
         }
 
         beforePromise
@@ -145,36 +146,39 @@ try {
                 return makeArchive(cmd, messages.FILES);
             })
 
-            .then(() => { //Скачиваем резервную копию файлов
-                let remotePath = remoteTmpDir + archiveName_file,
-                    localPath = pathResolve(__dirname + '/archive/' + archiveName_file);
+            //Скачиваем резервную копию файлов
+            .then(() => downloadArchive((remoteTmpDir + archiveName_file), (localPath + archiveName_file), messages.FILES))
 
-                return downloadArchive(remotePath, localPath, messages.FILES);
-            })
+            //Удаляем временные файлы
+            .then(() => removeTmpArchive(archiveName_file, messages.FILES))
 
-            .then(() => removeTmpArchive(archiveName_file, messages.FILES)) //Удаляем временные файлы
+            //Создаем дамп БД
+            .then(() => {
 
-            .then(() => { //Создаем дамп БД
+                if (!config.mysql || !config.mysql.database || !config.mysql.user || !config.mysql.password) {
+                    throw 'end_of_steps';
+                }
+
                 let cmd = 'mysqldump -u ' + config.mysql.user + ' -p' + config.mysql.password + ' ' + config.mysql.database + ' | gzip > ' + remoteTmpDir + archiveName_mysql;
                 return makeArchive(cmd, messages.DB);
             })
 
-            .then(() => { //Скачиваем дамп БД
+            //Скачиваем дамп БД
+            .then(() => downloadArchive((remoteTmpDir + archiveName_mysql), (localPath + archiveName_mysql), messages.DB))
 
-                let remotePath = remoteTmpDir + archiveName_mysql,
-                    localPath = pathResolve(__dirname + '/archive/' + archiveName_mysql);
-
-                return downloadArchive(remotePath, localPath, messages.DB);
-            })
-
-            .then(() => removeTmpArchive(archiveName_mysql, messages.DB)) //Удаляем временные файлы
+            //Удаляем временные файлы
+            .then(() => removeTmpArchive(archiveName_mysql, messages.DB))
 
             .then(() => { //Закрываем соединение
                 sshConn.end();
             })
 
             .catch(err => { //Отлавливаем ошибки, если будут.
-                console.log(err.bold.red);
+
+                if (err != 'end_of_steps') {
+                    console.log(err);
+                }
+
                 sshConn.end();
             });
 
