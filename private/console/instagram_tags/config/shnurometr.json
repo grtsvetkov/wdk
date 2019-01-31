@@ -1,0 +1,11 @@
+{
+  "tag": "hello",
+  "table": "photo",
+  "requestLimit": 10,
+  "mysql": {
+    "host": "localhost",
+    "user": "rim",
+    "password": "YTelfkjcm2987!",
+    "database": "shnurometr"
+  }
+}
